@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import io from "socket.io-client";
 
-const socket = io("http://localhost:3001");
+const socket = io("https://omegle-clone-7jpr.onrender.com",{
+  transports: ["websocket"],
+});
 
 function App() {
   const localVideo = useRef();
