@@ -5,14 +5,12 @@ const { Server } = require("socket.io");
 
 const app = express();
 
-// CORS for frontend
 app.use(cors({
   origin: "*",
 }));
 
 const server = http.createServer(app);
 
-// Socket setup
 const io = new Server(server, {
   cors: {
     origin: "*",
@@ -25,6 +23,7 @@ let waitingQueue = [];
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 
+  // 🔍 FIND PARTNER
   socket.on("find", () => {
     if (waitingQueue.length > 0) {
       const partner = waitingQueue.shift();
@@ -41,18 +40,22 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("offer", ({ roomId, offer }) => {
-    socket.to(roomId).emit("offer", offer);
+  // 📞 OFFER
+  socket.on("offer", ({ offer, room }) => {
+    socket.to(room).emit("offer", { offer });
   });
 
-  socket.on("answer", ({ roomId, answer }) => {
-    socket.to(roomId).emit("answer", answer);
+  // 📲 ANSWER
+  socket.on("answer", ({ answer, room }) => {
+    socket.to(room).emit("answer", { answer });
   });
 
-  socket.on("ice", ({ roomId, candidate }) => {
-    socket.to(roomId).emit("ice", candidate);
+  // ❄ ICE CANDIDATE (FIXED)
+  socket.on("ice-candidate", ({ candidate, room }) => {
+    socket.to(room).emit("ice-candidate", { candidate });
   });
 
+  // ⏭ NEXT USER
   socket.on("next", () => {
     socket.leaveAll();
     socket.emit("waiting");
@@ -62,9 +65,11 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ❌ DISCONNECT
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);
-    waitingQueue = waitingQueue.filter(u => u.id !== socket.id);
+
+    waitingQueue = waitingQueue.filter((s) => s.id !== socket.id);
   });
 });
 

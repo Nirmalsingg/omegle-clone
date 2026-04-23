@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import io from "socket.io-client";
 
-const socket = io("https://omegle-clone-7jpr.onrender.com",{
+const socket = io("https://omegle-clone-7jpr.onrender.com", {
   transports: ["websocket"],
 });
 
@@ -12,6 +12,8 @@ function App() {
   const roomId = useRef(null);
 
   const [status, setStatus] = useState("Click Start");
+
+  let localStream = useRef(null);
 
   useEffect(() => {
     startCamera();
@@ -26,20 +28,23 @@ function App() {
       createOffer();
     });
 
-    socket.on("offer", async (offer) => {
+    socket.on("offer", async ({ offer }) => {
       await createAnswer(offer);
     });
 
-    socket.on("answer", async (answer) => {
-      await peerConnection.current.setRemoteDescription(answer);
+    socket.on("answer", async ({ answer }) => {
+      await peerConnection.current.setRemoteDescription(
+        new RTCSessionDescription(answer)
+      );
     });
 
-    socket.on("ice", async (candidate) => {
+    socket.on("ice-candidate", async ({ candidate }) => {
       if (candidate) {
-        await peerConnection.current.addIceCandidate(candidate);
+        await peerConnection.current.addIceCandidate(
+          new RTCIceCandidate(candidate)
+        );
       }
     });
-
   }, []);
 
   // 🎥 CAMERA
@@ -48,33 +53,33 @@ function App() {
       video: true,
       audio: true,
     });
+
+    localStream.current = stream;
     localVideo.current.srcObject = stream;
   };
 
   // 🔗 PEER CONNECTION
   const createPeerConnection = () => {
     peerConnection.current = new RTCPeerConnection({
-  iceServers: [
-    { urls: "stun:stun.l.google.com:19302" },
-    
-  ],
-});
-
-    const stream = localVideo.current.srcObject;
-
-    stream.getTracks().forEach((track) => {
-      peerConnection.current.addTrack(track, stream);
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
 
+    // send tracks
+    localStream.current.getTracks().forEach((track) => {
+      peerConnection.current.addTrack(track, localStream.current);
+    });
+
+    // receive remote video
     peerConnection.current.ontrack = (event) => {
       remoteVideo.current.srcObject = event.streams[0];
     };
 
+    // send ICE
     peerConnection.current.onicecandidate = (event) => {
       if (event.candidate) {
-        socket.emit("ice", {
-          roomId: roomId.current,
+        socket.emit("ice-candidate", {
           candidate: event.candidate,
+          room: roomId.current,
         });
       }
     };
@@ -88,29 +93,30 @@ function App() {
     await peerConnection.current.setLocalDescription(offer);
 
     socket.emit("offer", {
-      roomId: roomId.current,
       offer,
+      room: roomId.current,
     });
   };
 
-  // 📞 ANSWER
+  // 📲 ANSWER
   const createAnswer = async (offer) => {
     createPeerConnection();
 
-    await peerConnection.current.setRemoteDescription(offer);
+    await peerConnection.current.setRemoteDescription(
+      new RTCSessionDescription(offer)
+    );
 
     const answer = await peerConnection.current.createAnswer();
     await peerConnection.current.setLocalDescription(answer);
 
     socket.emit("answer", {
-      roomId: roomId.current,
       answer,
+      room: roomId.current,
     });
   };
 
   return (
-    <div style={{ textAlign: "center", background: "#1a002b", minHeight: "100vh", color: "white", paddingTop: "20px" }}>
-      
+    <div style={{ textAlign: "center", background: "#1a002b", minHeight: "100vh", color: "white" }}>
       <h1 style={{ color: "#ff4ecd" }}>Omegle Clone 🔥</h1>
       <h3>{status}</h3>
 
@@ -128,7 +134,6 @@ function App() {
         <video ref={localVideo} autoPlay muted style={videoStyle} />
         <video ref={remoteVideo} autoPlay style={videoStyle} />
       </div>
-
     </div>
   );
 }
@@ -147,7 +152,6 @@ const btnStyle = {
   borderRadius: "10px",
   color: "white",
   cursor: "pointer",
-  fontSize: "16px",
 };
 
 export default App;
