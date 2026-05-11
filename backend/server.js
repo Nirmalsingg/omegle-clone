@@ -1,13 +1,12 @@
+```javascript id="g2k9vm"
 const express = require("express");
 const http = require("http");
-const cors = require("cors");
 const { Server } = require("socket.io");
+const cors = require("cors");
 
 const app = express();
 
-app.use(cors({
-  origin: "*",
-}));
+app.use(cors());
 
 const server = http.createServer(app);
 
@@ -18,53 +17,36 @@ const io = new Server(server, {
   },
 });
 
-let waitingQueue = [];
-const socketToRoom = new Map();
-
-const removeFromQueue = (socketId) => {
-  waitingQueue = waitingQueue.filter((id) => id !== socketId);
-};
-
-const createRoomId = (a, b) => [a, b].sort().join("-");
-const clearRoomMappings = (roomId) => {
-  const participants = io.sockets.adapter.rooms.get(roomId);
-  if (!participants) {
-    return;
-  }
-
-  participants.forEach((participantId) => {
-    socketToRoom.delete(participantId);
-  });
-};
+let waitingUser = null;
 
 io.on("connection", (socket) => {
-  console.log("User connected:", socket.id);
+  console.log("USER CONNECTED:", socket.id);
 
-  // Find a random partner from queue.
   socket.on("find", () => {
-    if (socketToRoom.has(socket.id)) {
-      return;
-    }
+    if (waitingUser && waitingUser !== socket.id) {
 
-    removeFromQueue(socket.id);
+      const roomId = waitingUser + "-" + socket.id;
 
-    const partnerId = waitingQueue.shift();
-    const partnerSocket = partnerId ? io.sockets.sockets.get(partnerId) : null;
+      socket.join(roomId);
 
-    if (!partnerSocket) {
-      waitingQueue.push(socket.id);
+      const waitingSocket = io.sockets.sockets.get(waitingUser);
+
+      if (waitingSocket) {
+        waitingSocket.join(roomId);
+
+        io.to(roomId).emit("matched", roomId);
+
+        console.log("MATCHED:", roomId);
+      }
+
+      waitingUser = null;
+
+    } else {
+
+      waitingUser = socket.id;
+
       socket.emit("waiting");
-      return;
     }
-
-    const roomId = createRoomId(socket.id, partnerSocket.id);
-    socket.join(roomId);
-    partnerSocket.join(roomId);
-
-    socketToRoom.set(socket.id, roomId);
-    socketToRoom.set(partnerSocket.id, roomId);
-
-    io.to(roomId).emit("matched", roomId);
   });
 
   socket.on("offer", ({ offer, roomId }) => {
@@ -87,34 +69,45 @@ io.on("connection", (socket) => {
   });
 
   socket.on("next", () => {
-    const roomId = socketToRoom.get(socket.id);
-    if (roomId) {
-      socket.to(roomId).emit("partner-disconnected");
-      clearRoomMappings(roomId);
-      socket.leave(roomId);
-    }
+    socket.rooms.forEach((room) => {
 
-    removeFromQueue(socket.id);
+      if (room !== socket.id) {
+
+        socket.leave(room);
+
+        socket.to(room).emit("partner-disconnected");
+      }
+    });
+
+    waitingUser = socket.id;
+
     socket.emit("waiting");
-
-    waitingQueue.push(socket.id);
   });
 
   socket.on("disconnect", () => {
-    console.log("User disconnected:", socket.id);
+    console.log("DISCONNECTED:", socket.id);
 
-    const roomId = socketToRoom.get(socket.id);
-    if (roomId) {
-      socket.to(roomId).emit("partner-disconnected");
-      clearRoomMappings(roomId);
+    if (waitingUser === socket.id) {
+      waitingUser = null;
     }
 
-    removeFromQueue(socket.id);
+    socket.rooms.forEach((room) => {
+
+      if (room !== socket.id) {
+
+        socket.to(room).emit("partner-disconnected");
+      }
+    });
   });
+});
+
+app.get("/", (req, res) => {
+  res.send("Server running");
 });
 
 const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, () => {
-  console.log("Server running on port", PORT);
+  console.log("Server running on port " + PORT);
 });
+```
