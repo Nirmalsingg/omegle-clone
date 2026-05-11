@@ -19,57 +19,97 @@ const io = new Server(server, {
 });
 
 let waitingQueue = [];
+const socketToRoom = new Map();
+
+const removeFromQueue = (socketId) => {
+  waitingQueue = waitingQueue.filter((id) => id !== socketId);
+};
+
+const createRoomId = (a, b) => [a, b].sort().join("-");
+const clearRoomMappings = (roomId) => {
+  const participants = io.sockets.adapter.rooms.get(roomId);
+  if (!participants) {
+    return;
+  }
+
+  participants.forEach((participantId) => {
+    socketToRoom.delete(participantId);
+  });
+};
 
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 
-  // 🔍 FIND PARTNER
+  // Find a random partner from queue.
   socket.on("find", () => {
-    if (waitingQueue.length > 0) {
-      const partner = waitingQueue.shift();
-
-      const roomId = socket.id + "-" + partner.id;
-
-      socket.join(roomId);
-      partner.join(roomId);
-
-      io.to(roomId).emit("matched", roomId);
-    } else {
-      waitingQueue.push(socket);
-      socket.emit("waiting");
+    if (socketToRoom.has(socket.id)) {
+      return;
     }
+
+    removeFromQueue(socket.id);
+
+    const partnerId = waitingQueue.shift();
+    const partnerSocket = partnerId ? io.sockets.sockets.get(partnerId) : null;
+
+    if (!partnerSocket) {
+      waitingQueue.push(socket.id);
+      socket.emit("waiting");
+      return;
+    }
+
+    const roomId = createRoomId(socket.id, partnerSocket.id);
+    socket.join(roomId);
+    partnerSocket.join(roomId);
+
+    socketToRoom.set(socket.id, roomId);
+    socketToRoom.set(partnerSocket.id, roomId);
+
+    io.to(roomId).emit("matched", roomId);
   });
 
-  // 📞 OFFER
-  socket.on("offer", ({ offer, room }) => {
-    socket.to(room).emit("offer", { offer });
+  socket.on("offer", ({ offer, roomId }) => {
+    socket.to(roomId).emit("offer", offer);
   });
 
-  // 📲 ANSWER
-  socket.on("answer", ({ answer, room }) => {
-    socket.to(room).emit("answer", { answer });
+  socket.on("answer", ({ answer, roomId }) => {
+    socket.to(roomId).emit("answer", answer);
   });
 
-  // ❄ ICE CANDIDATE (FIXED)
-  socket.on("ice-candidate", ({ candidate, room }) => {
-    socket.to(room).emit("ice-candidate", { candidate });
+  socket.on("ice-candidate", ({ candidate, roomId }) => {
+    socket.to(roomId).emit("ice-candidate", candidate);
   });
 
-  // ⏭ NEXT USER
+  socket.on("message", ({ text, roomId }) => {
+    socket.to(roomId).emit("message", {
+      sender: "stranger",
+      text,
+    });
+  });
+
   socket.on("next", () => {
-    socket.leaveAll();
+    const roomId = socketToRoom.get(socket.id);
+    if (roomId) {
+      socket.to(roomId).emit("partner-disconnected");
+      clearRoomMappings(roomId);
+      socket.leave(roomId);
+    }
+
+    removeFromQueue(socket.id);
     socket.emit("waiting");
 
-    if (!waitingQueue.includes(socket)) {
-      waitingQueue.push(socket);
-    }
+    waitingQueue.push(socket.id);
   });
 
-  // ❌ DISCONNECT
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);
 
-    waitingQueue = waitingQueue.filter((s) => s.id !== socket.id);
+    const roomId = socketToRoom.get(socket.id);
+    if (roomId) {
+      socket.to(roomId).emit("partner-disconnected");
+      clearRoomMappings(roomId);
+    }
+
+    removeFromQueue(socket.id);
   });
 });
 
