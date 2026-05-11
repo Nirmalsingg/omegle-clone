@@ -62,8 +62,6 @@ function App() {
 
     peerConnection.current = new RTCPeerConnection(configuration);
 
-    console.log("PEER CONNECTION CREATED");
-
     if (localStream.current) {
       localStream.current.getTracks().forEach((track) => {
         peerConnection.current.addTrack(track, localStream.current);
@@ -71,8 +69,6 @@ function App() {
     }
 
     peerConnection.current.ontrack = (event) => {
-      console.log("REMOTE STREAM RECEIVED");
-
       if (remoteVideo.current) {
         remoteVideo.current.srcObject = event.streams[0];
       }
@@ -85,13 +81,6 @@ function App() {
           roomId: roomId.current,
         });
       }
-    };
-
-    peerConnection.current.onconnectionstatechange = () => {
-      console.log(
-        "CONNECTION STATE:",
-        peerConnection.current.connectionState
-      );
     };
   };
 
@@ -151,14 +140,12 @@ function App() {
     });
 
     socket.on("matched", async (room) => {
-      console.log("MATCHED:", room);
-
       roomId.current = room;
 
       setStatus("Connected!");
       setMessages([]);
 
-      const [firstUser] = room.split("-");
+      const firstUser = room.split("-")[0];
 
       if (socket.id === firstUser) {
         await createOffer();
@@ -166,14 +153,10 @@ function App() {
     });
 
     socket.on("offer", async (offer) => {
-      console.log("OFFER RECEIVED");
-
       await createAnswer(offer);
     });
 
     socket.on("answer", async (answer) => {
-      console.log("ANSWER RECEIVED");
-
       if (!peerConnection.current) return;
 
       await peerConnection.current.setRemoteDescription(
@@ -182,8 +165,6 @@ function App() {
     });
 
     socket.on("ice-candidate", async (candidate) => {
-      console.log("ICE RECEIVED");
-
       try {
         if (peerConnection.current) {
           await peerConnection.current.addIceCandidate(
@@ -191,7 +172,7 @@ function App() {
           );
         }
       } catch (err) {
-        console.error("ICE ERROR:", err);
+        console.error(err);
       }
     });
 
@@ -204,7 +185,7 @@ function App() {
 
       setStatus("Partner disconnected");
 
-      addMessage("Partner disconnected", "system");
+      addMessage("Partner disconnected");
     });
 
     return () => {
@@ -285,8 +266,8 @@ function App() {
         <video
           ref={localVideo}
           autoPlay
-          playsInline
           muted
+          playsInline
           style={videoStyle}
         />
 
@@ -379,5 +360,6 @@ const inputStyle = {
   background: "#11001d",
   color: "white",
 };
+
 export default App;
 ```
