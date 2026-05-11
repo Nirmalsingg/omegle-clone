@@ -379,6 +379,5 @@ const inputStyle = {
   background: "#11001d",
   color: "white",
 };
-
 export default App;
 ```
