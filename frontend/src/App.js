@@ -1,139 +1,68 @@
+```javascript
 import React, { useEffect, useRef, useState } from "react";
 import io from "socket.io-client";
 
 const SIGNALING_URL =
-  process.env.REACT_APP_SIGNALING_URL || "http://localhost:5000";
+  process.env.REACT_APP_SIGNALING_URL ||
+  "https://omegle-clone-1-p24f.onrender.com";
 
 const socket = io(SIGNALING_URL, {
   transports: ["websocket"],
 });
 
 function App() {
-  const localVideo = useRef();
-  const remoteVideo = useRef();
+  const localVideo = useRef(null);
+  const remoteVideo = useRef(null);
+
   const peerConnection = useRef(null);
-  const roomId = useRef(null);
   const localStream = useRef(null);
-  const iceQueue = useRef([]);
-  const chatInputRef = useRef();
+
+  const roomId = useRef(null);
+  const chatInputRef = useRef(null);
 
   const [status, setStatus] = useState("Click Start");
   const [messages, setMessages] = useState([]);
 
-  const addMessage = (text, sender = "you") => {
-    setMessages((prev) => [...prev, { sender, text }]);
+  const configuration = {
+    iceServers: [
+      {
+        urls: "stun:stun.l.google.com:19302",
+      },
+      {
+        urls: "stun:global.stun.twilio.com:3478",
+      },
+      {
+        urls: "turn:openrelay.metered.ca:80",
+        username: "openrelayproject",
+        credential: "openrelayproject",
+      },
+    ],
   };
 
-  const destroyPeerConnection = () => {
+  const addMessage = (text, sender = "system") => {
+    setMessages((prev) => [...prev, { text, sender }]);
+  };
+
+  const cleanupConnection = () => {
     if (peerConnection.current) {
-      peerConnection.current.onicecandidate = null;
       peerConnection.current.ontrack = null;
+      peerConnection.current.onicecandidate = null;
+
       peerConnection.current.close();
       peerConnection.current = null;
     }
 
-    iceQueue.current = [];
-    roomId.current = null;
     if (remoteVideo.current) {
       remoteVideo.current.srcObject = null;
     }
   };
 
-  useEffect(() => {
-    const onWaiting = () => {
-      destroyPeerConnection();
-      setMessages([]);
-      setStatus("Waiting for partner...");
-    };
-
-    const onMatched = (room) => {
-      roomId.current = room;
-      setMessages([{ sender: "system", text: "You are now connected." }]);
-      setStatus("Connected!");
-
-      const [first] = room.split("-");
-      if (socket.id === first) {
-        createOffer();
-      }
-    };
-
-    const onOffer = async (offer) => {
-      await createAnswer(offer);
-    };
-
-    const onAnswer = async (answer) => {
-      if (!peerConnection.current) return;
-
-      await peerConnection.current.setRemoteDescription(
-        new RTCSessionDescription(answer)
-      );
-
-      for (const candidate of iceQueue.current) {
-        await peerConnection.current.addIceCandidate(candidate);
-      }
-      iceQueue.current = [];
-    };
-
-    const onIceCandidate = async (candidate) => {
-      if (!peerConnection.current) return;
-
-      const rtcCandidate = new RTCIceCandidate(candidate);
-      if (peerConnection.current.remoteDescription) {
-        await peerConnection.current.addIceCandidate(rtcCandidate);
-      } else {
-        iceQueue.current.push(rtcCandidate);
-      }
-    };
-
-    const onMessage = ({ sender, text }) => {
-      addMessage(text, sender);
-    };
-
-    const onPartnerDisconnected = () => {
-      destroyPeerConnection();
-      addMessage("Partner disconnected. Click Next to find someone new.", "system");
-      setStatus("Partner disconnected");
-    };
-
-    socket.on("waiting", onWaiting);
-    socket.on("matched", onMatched);
-    socket.on("offer", onOffer);
-    socket.on("answer", onAnswer);
-    socket.on("ice-candidate", onIceCandidate);
-    socket.on("message", onMessage);
-    socket.on("partner-disconnected", onPartnerDisconnected);
-
-    return () => {
-      socket.off("waiting", onWaiting);
-      socket.off("matched", onMatched);
-      socket.off("offer", onOffer);
-      socket.off("answer", onAnswer);
-      socket.off("ice-candidate", onIceCandidate);
-      socket.off("message", onMessage);
-      socket.off("partner-disconnected", onPartnerDisconnected);
-      destroyPeerConnection();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const startCamera = async () => {
-    if (localStream.current) return;
-
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: true,
-      audio: true,
-    });
-
-    localStream.current = stream;
-    localVideo.current.srcObject = stream;
-  };
-
   const createPeerConnection = () => {
     if (peerConnection.current) return;
 
-    peerConnection.current = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    });
+    peerConnection.current = new RTCPeerConnection(configuration);
+
+    console.log("PEER CONNECTION CREATED");
 
     if (localStream.current) {
       localStream.current.getTracks().forEach((track) => {
@@ -142,7 +71,11 @@ function App() {
     }
 
     peerConnection.current.ontrack = (event) => {
-      remoteVideo.current.srcObject = event.streams[0];
+      console.log("REMOTE STREAM RECEIVED");
+
+      if (remoteVideo.current) {
+        remoteVideo.current.srcObject = event.streams[0];
+      }
     };
 
     peerConnection.current.onicecandidate = (event) => {
@@ -153,12 +86,40 @@ function App() {
         });
       }
     };
+
+    peerConnection.current.onconnectionstatechange = () => {
+      console.log(
+        "CONNECTION STATE:",
+        peerConnection.current.connectionState
+      );
+    };
+  };
+
+  const startCamera = async () => {
+    if (localStream.current) return;
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true,
+      });
+
+      localStream.current = stream;
+
+      if (localVideo.current) {
+        localVideo.current.srcObject = stream;
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Camera/Microphone permission denied");
+    }
   };
 
   const createOffer = async () => {
     createPeerConnection();
 
     const offer = await peerConnection.current.createOffer();
+
     await peerConnection.current.setLocalDescription(offer);
 
     socket.emit("offer", {
@@ -175,6 +136,7 @@ function App() {
     );
 
     const answer = await peerConnection.current.createAnswer();
+
     await peerConnection.current.setLocalDescription(answer);
 
     socket.emit("answer", {
@@ -183,76 +145,185 @@ function App() {
     });
   };
 
+  useEffect(() => {
+    socket.on("waiting", () => {
+      setStatus("Waiting for partner...");
+    });
+
+    socket.on("matched", async (room) => {
+      console.log("MATCHED:", room);
+
+      roomId.current = room;
+
+      setStatus("Connected!");
+      setMessages([]);
+
+      const [firstUser] = room.split("-");
+
+      if (socket.id === firstUser) {
+        await createOffer();
+      }
+    });
+
+    socket.on("offer", async (offer) => {
+      console.log("OFFER RECEIVED");
+
+      await createAnswer(offer);
+    });
+
+    socket.on("answer", async (answer) => {
+      console.log("ANSWER RECEIVED");
+
+      if (!peerConnection.current) return;
+
+      await peerConnection.current.setRemoteDescription(
+        new RTCSessionDescription(answer)
+      );
+    });
+
+    socket.on("ice-candidate", async (candidate) => {
+      console.log("ICE RECEIVED");
+
+      try {
+        if (peerConnection.current) {
+          await peerConnection.current.addIceCandidate(
+            new RTCIceCandidate(candidate)
+          );
+        }
+      } catch (err) {
+        console.error("ICE ERROR:", err);
+      }
+    });
+
+    socket.on("message", ({ text, sender }) => {
+      addMessage(text, sender);
+    });
+
+    socket.on("partner-disconnected", () => {
+      cleanupConnection();
+
+      setStatus("Partner disconnected");
+
+      addMessage("Partner disconnected", "system");
+    });
+
+    return () => {
+      socket.off("waiting");
+      socket.off("matched");
+      socket.off("offer");
+      socket.off("answer");
+      socket.off("ice-candidate");
+      socket.off("message");
+      socket.off("partner-disconnected");
+    };
+  }, []);
+
   const handleStart = async () => {
     await startCamera();
+
     socket.emit("find");
   };
 
   const handleNext = () => {
-    destroyPeerConnection();
+    cleanupConnection();
+
     setMessages([]);
-    setStatus("Waiting for partner...");
+
+    setStatus("Searching new partner...");
+
     socket.emit("next");
   };
 
-  const handleSendMessage = () => {
-    const text = chatInputRef.current?.value?.trim();
+  const sendMessage = () => {
+    const text = chatInputRef.current.value.trim();
+
     if (!text || !roomId.current) return;
 
     addMessage(text, "you");
-    socket.emit("message", { text, roomId: roomId.current });
+
+    socket.emit("message", {
+      text,
+      roomId: roomId.current,
+    });
+
     chatInputRef.current.value = "";
   };
 
   return (
     <div
       style={{
-        textAlign: "center",
-        background: "#1a002b",
         minHeight: "100vh",
+        background: "#1a002b",
         color: "white",
-        paddingBottom: "24px",
+        textAlign: "center",
+        paddingBottom: "30px",
       }}
     >
-      <h1 style={{ color: "#ff4ecd" }}>Omegle Clone</h1>
-      <h3>{status}</h3>
+      <h1 style={{ color: "#ff4ecd" }}>Omegle Clone 🔥</h1>
 
-      <div style={{ margin: "20px" }}>
-        <button onClick={handleStart} style={btnStyle}>
+      <h2>{status}</h2>
+
+      <div>
+        <button style={btnStyle} onClick={handleStart}>
           Start
         </button>
 
-        <button onClick={handleNext} style={btnStyle}>
+        <button style={btnStyle} onClick={handleNext}>
           Next
         </button>
       </div>
 
-      <div style={{ display: "flex", justifyContent: "center", gap: "20px" }}>
-        <video ref={localVideo} autoPlay muted style={videoStyle} />
-        <video ref={remoteVideo} autoPlay style={videoStyle} />
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          gap: "20px",
+          marginTop: "30px",
+          flexWrap: "wrap",
+        }}
+      >
+        <video
+          ref={localVideo}
+          autoPlay
+          playsInline
+          muted
+          style={videoStyle}
+        />
+
+        <video
+          ref={remoteVideo}
+          autoPlay
+          playsInline
+          style={videoStyle}
+        />
       </div>
 
       <div style={chatBoxStyle}>
-        <h4>Chat</h4>
+        <h3>Chat</h3>
+
         <div style={chatListStyle}>
-          {messages.map((msg, idx) => (
-            <p key={`${msg.sender}-${idx}`} style={{ margin: "6px 0" }}>
-              <strong>{msg.sender}:</strong> {msg.text}
+          {messages.map((msg, index) => (
+            <p key={index}>
+              <strong>{msg.sender}: </strong>
+              {msg.text}
             </p>
           ))}
         </div>
 
-        <div style={{ display: "flex", gap: "8px" }}>
+        <div style={{ display: "flex", gap: "10px" }}>
           <input
             ref={chatInputRef}
             type="text"
             placeholder="Type message..."
             style={inputStyle}
             onKeyDown={(e) => {
-              if (e.key === "Enter") handleSendMessage();
+              if (e.key === "Enter") {
+                sendMessage();
+              }
             }}
           />
-          <button style={btnStyle} onClick={handleSendMessage}>
+
+          <button style={btnStyle} onClick={sendMessage}>
             Send
           </button>
         </div>
@@ -262,10 +333,12 @@ function App() {
 }
 
 const videoStyle = {
-  width: "300px",
-  borderRadius: "15px",
+  width: "320px",
+  height: "240px",
+  borderRadius: "16px",
   border: "2px solid #ff4ecd",
   background: "#11001d",
+  objectFit: "cover",
 };
 
 const btnStyle = {
@@ -279,32 +352,33 @@ const btnStyle = {
 };
 
 const chatBoxStyle = {
-  width: "min(640px, 92vw)",
-  margin: "24px auto 0",
-  textAlign: "left",
+  width: "min(700px, 92vw)",
+  margin: "30px auto 0",
   background: "#25013d",
+  borderRadius: "15px",
+  padding: "15px",
   border: "1px solid #7424ac",
-  borderRadius: "12px",
-  padding: "12px",
 };
 
 const chatListStyle = {
-  minHeight: "120px",
-  maxHeight: "220px",
+  minHeight: "150px",
+  maxHeight: "250px",
   overflowY: "auto",
   background: "#170028",
-  borderRadius: "8px",
-  padding: "8px 12px",
+  padding: "10px",
+  borderRadius: "10px",
   marginBottom: "10px",
+  textAlign: "left",
 };
 
 const inputStyle = {
   flex: 1,
-  borderRadius: "8px",
-  border: "1px solid #6a2f95",
-  background: "#130021",
-  color: "white",
   padding: "10px",
+  borderRadius: "10px",
+  border: "1px solid #7424ac",
+  background: "#11001d",
+  color: "white",
 };
 
 export default App;
+```
