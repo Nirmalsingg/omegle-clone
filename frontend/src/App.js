@@ -1,4 +1,4 @@
-```javascript
+
 import React, { useEffect, useRef, useState } from "react";
 import io from "socket.io-client";
 
@@ -362,4 +362,4 @@ const inputStyle = {
 };
 
 export default App;
-```
+
